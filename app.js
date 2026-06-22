@@ -1,6 +1,15 @@
-// ── CONFIGURACIÓN DE ORIGEN DE DATOS DIRECTO (GOOGLE SHEETS PUBLICADO EN CSV) ──
-// RECUERDA: Reemplaza esta URL por la nueva que generes al "Guardar como Hoja de cálculo de Google" y "Publicar en la web" como CSV.
-const EXCEL_DATA_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTYiU1nxu_oBNnGxEf8E4NU2_ibEZNq0Pn0o521_28fNTDBb8KBNOKm5KTchiRCjw/pub?output=csv";
+// ── CONFIGURACIÓN DE ORIGEN DE DATOS DIRECTO (GOOGLE SHEETS POR PESTAÑAS) ──
+// Base del documento (extraída de tu URL original)
+const SPREADSHEET_BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRtk4YnsUipIXMEhjv-vAly0VmChMBQEwvMhkUikPaZSKoynAET1yziqeU4KyUe9s8jjrzY24SItTmo/pub?output=csv";
+
+// Definición explícita de las pestañas de tu Google Sheet
+const HOJAS_CONFIG = [
+  { anio: "2022", nombreHoja: "V22" },
+  { anio: "2023", nombreHoja: "V23" },
+  { anio: "2024", nombreHoja: "V24" },
+  { anio: "2025", nombreHoja: "V25" },
+  { anio: "2026", nombreHoja: "V26" }
+];
 
 // ── Almacenamiento Estructurado de Historial ────────────────────────────────
 let historicalStore = {}; 
@@ -37,27 +46,37 @@ if (typeof Chart !== 'undefined') {
 function baseScales() { return { x:{grid:{color:PALETTE.grid}}, y:{grid:{color:PALETTE.grid}, ticks:{callback:v=>fmtFull(v)}} }; }
 function destroyChart(id) { if(charts[id]) { charts[id].destroy(); delete charts[id]; } }
 
-// ── Lector Nativo Directo para CSV de Google Sheets ──────────────────────────
+// ── Lector Multihoya para Google Sheets ──────────────────────────────────────
 async function loadLiveExcelData() {
   const loadingEl = document.getElementById('loadingSection');
   const contentEl = document.getElementById('dashboardContent');
 
   try {
-    console.log("Conectando directo al CSV de Google Sheets...");
-    const response = await fetch(EXCEL_DATA_URL);
-    if (!response.ok) {
-      throw new Error(`HTTP Error: El servidor de Google Sheets respondió con status ${response.status}`);
-    }
+    console.log("Iniciando descarga simultánea de pestañas históricas (V22-V26)...");
+    historicalStore = {}; 
 
-    const csvText = await response.text();
-    
-    // Validar si devolvió un HTML de login en vez del CSV crudo
-    if (csvText.substring(0, 100).includes("<!DOCTYPE") || csvText.substring(0, 100).includes("<html")) {
-      throw new Error("El enlace público devolvió código HTML en lugar de datos tabulares. Revisa los accesos del documento.");
-    }
+    // Crear promesas de descarga para cada pestaña de forma paralela
+    const fetchPromises = HOJAS_CONFIG.map(async (hoja) => {
+      // Forzar a la URL de publicación a pedir la pestaña específica por su nombre
+      const urlConHoja = `${SPREADSHEET_BASE_URL}&sheet=${encodeURIComponent(hoja.nombreHoja)}`;
+      
+      const response = await fetch(urlConHoja);
+      if (!response.ok) {
+        throw new Error(`Error descargando pestaña ${hoja.nombreHoja} (Status ${response.status})`);
+      }
+      
+      const csvText = await response.text();
+      
+      if (csvText.substring(0, 100).includes("<!DOCTYPE") || csvText.substring(0, 100).includes("<html")) {
+        throw new Error(`La pestaña ${hoja.nombreHoja} no está disponible públicamente.`);
+      }
 
-    // Parsear el CSV crudo de Google Sheets
-    processCSVData(csvText);
+      // Procesar datos asignándole el año correspondiente
+      processCSVDataForYear(csvText, hoja.anio);
+    });
+
+    // Esperar a que se completen todas las descargas
+    await Promise.all(fetchPromises);
 
     if (loadingEl) loadingEl.classList.add('hidden');
     if (contentEl) contentEl.classList.remove('hidden');
@@ -65,7 +84,7 @@ async function loadLiveExcelData() {
     initDashboardSelectors();
 
   } catch (err) {
-    console.error("Error cargando el CSV:", err);
+    console.error("Error cargando los datos:", err);
     if (loadingEl) {
       loadingEl.innerHTML = `
         <div class="text-center space-y-4 py-16 px-4">
@@ -74,8 +93,8 @@ async function loadLiveExcelData() {
             ${err.message}
           </p>
           <div class="p-4 bg-slate-900 border border-slate-800 rounded-lg text-left text-xs text-slate-400 max-w-xl mx-auto space-y-2">
-            <p class="font-bold text-indigo-400">Verificaciones recomendadas:</p>
-            <p>Asegúrate de haber seleccionado <strong>"Publicar en la web"</strong> en el menú Archivo de Sheets, escogiendo la opción de exportar como <strong>Valores separados por comas (.csv)</strong>.</p>
+            <p class="font-bold text-indigo-400">Verificación Crítica para Varias Hojas:</p>
+            <p>Asegúrate de que al ir a <strong>Archivo > Compartir > Publicar en la web</strong>, hayas seleccionado publicar <strong>"Todo el documento"</strong> como CSV, y no únicamente una pestaña individual.</p>
           </div>
           <button onclick="location.reload()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition-all">
             Reintentar Conexión
@@ -109,14 +128,11 @@ function parseCSVRows(text) {
   });
 }
 
-// ── Procesador Adaptativo de Registros ───────────────────────────────────────
-function processCSVData(csvText) {
+// ── Procesador Adaptativo por Año Específico ────────────────────────────────
+function processCSVDataForYear(csvText, yearKey) {
   const json = parseCSVRows(csvText);
-  historicalStore = {}; 
 
-  if (json.length < 2) {
-    throw new Error("El documento CSV de Google Sheets no contiene filas de datos.");
-  }
+  if (json.length < 2) return; // Pestaña vacía o sin datos suficientes
 
   // Buscar fila de cabeceras de forma dinámica
   let hdrIdx = -1;
@@ -143,36 +159,14 @@ function processCSVData(csvText) {
   const idxDoc    = col['DOCUMENTO INTERNO'] ?? col['DOCUMENTO'] ?? 6;
   const idxMes    = col['MES OC'] ?? col['MES'] ?? 20;
   const idxDia    = col['DIA OC'] ?? col['DIA'] ?? col['DÍA'] ?? -1;
-  const idxAnio   = col['AÑO OC'] ?? col['AÑO'] ?? -1;
-  const idxFecha  = col['FECHA'] ?? col['FECHA OC'] ?? 0; 
+
+  if (!historicalStore[yearKey]) {
+    historicalStore[yearKey] = [];
+  }
 
   for (let i = hdrIdx + 1; i < json.length; i++) {
     const r = json[i];
     if (!r || r.length === 0 || !r[idxNV]) continue; 
-
-    // Extraer el año de forma flexible y adaptada a la escala 2022 - 2026
-    let yearKey = ""; 
-    
-    // 1. Intentar por columna directa de año
-    if (idxAnio !== -1 && r[idxAnio]) {
-      yearKey = String(r[idxAnio]).trim().match(/\d+/)?.[0] || "";
-    } 
-    
-    // 2. Si falla, intentar extraerlo de la columna de fecha completa o columna 0
-    if ((!yearKey || yearKey.length < 2) && r[idxFecha]) {
-      const fechaStr = String(r[idxFecha]);
-      const matchAnio = fechaStr.match(/\b(202[2-6])\b/) || fechaStr.match(/\b(2[2-6])\b/);
-      if (matchAnio) yearKey = matchAnio[0];
-    }
-
-    // Normalizar formato de año de dos dígitos (ej: "24" -> "2024")
-    if (yearKey.length === 2) yearKey = "20" + yearKey;
-    
-    // Validar rango objetivo. Si no es un año válido entre 2022 y 2026, se categoriza como "Otros"
-    const numAnio = parseInt(yearKey);
-    if (isNaN(numAnio) || numAnio < 2022 || numAnio > 2026) {
-      yearKey = "Otros"; 
-    }
 
     let diaCalculado = "15"; 
     if (idxDia !== -1 && r[idxDia]) {
@@ -191,18 +185,15 @@ function processCSVData(csvText) {
       dia:      parseInt(diaCalculado) || 1
     };
 
-    if (!historicalStore[yearKey]) {
-      historicalStore[yearKey] = [];
-    }
     historicalStore[yearKey].push(rowObj);
   }
-  
-  console.log("Estructura de años cargada:", Object.keys(historicalStore));
 }
 
 // ── Inicialización de Controles ──────────────────────────────
 function initDashboardSelectors() {
+  // Ordenar los años de forma descendente (2026 primero, hasta 2022)
   const disponibles = Object.keys(historicalStore).sort((a,b) => b-a); 
+  
   if (disponibles.length === 0) {
     historicalStore["Datos"] = Object.values(historicalStore).flat();
     disponibles.push("Datos");
