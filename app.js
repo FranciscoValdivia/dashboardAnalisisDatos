@@ -1,7 +1,7 @@
 // ── CONFIGURACIÓN DE ORIGEN DE DATOS DIRECTO (GOOGLE SHEETS POR PESTAÑAS) ──
 const SPREADSHEET_BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTYiU1nxu_oBNnGxEf8E4NU2_ibEZNq0Pn0o521_28fNTDBb8KBNOKm5KTchiRCjw/pub?output=csv";
 
-// Mapeo explícito a las pestañas independientes de tu Google Sheet
+// Definición de las pestañas actuales en tu Google Sheet
 const HOJAS_CONFIG = [
   { anio: "2024", nombreHoja: "V24" },
   { anio: "2025", nombreHoja: "V25" },
@@ -26,15 +26,38 @@ const PALETTE = {
 };
 
 const MESES_NAMES = {
-  '1':'Enero','2':'Febrero','3':'Marzo','4':'Abril','5':'Mayo','6 JUNIO':'Junio','6':'Junio',
+  '1':'Enero','2':'Febrero','3':'Marzo','4 HARDWARE':'Abril','4':'Abril','5':'Mayo','6 JUNIO':'Junio','6':'Junio',
   '7':'Julio','8':'Agosto','9':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre',
   '01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio',
   '07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'
 };
 
 function getPortalColor(p) { return PALETTE.mappedPortales[String(p||'').trim().toUpperCase()] || PALETTE.defaultPortales[0]; }
-function fmtFull(v) { return (!v && v !== 0) ? '—' : '$' + Math.round(v).toLocaleString('es-CL'); }
-function safeNum(v) { const n = parseFloat(String(v || '').replace(/[$,\.\s]/g, '')); return isNaN(n) ? 0 : n; }
+
+// Formateador de moneda CL completo
+function fmtFull(v) { 
+  if (!v && v !== 0) return '—'; 
+  return '$' + Math.round(v).toLocaleString('es-CL'); 
+}
+
+// Limpiador numérico ultra estricto para evitar desajustes de puntos/comas de Excel
+function safeNum(v) {
+  if (!v) return 0;
+  // Elimina el signo $, espacios y puntos de miles (estilo chileno)
+  let clean = String(v).replace(/[\$\s]/g, '');
+  // Si usa punto como separador de miles, por ejemplo 1.500.000
+  if (clean.includes('.') && !clean.includes(',')) {
+    clean = clean.replace(/\./g, '');
+  } else if (clean.includes('.') && clean.includes(',')) {
+    // Si tiene punto de miles y coma decimal (1.500,50)
+    clean = clean.replace(/\./g, '').replace(',', '.');
+  } else if (clean.includes(',')) {
+    // Si solo tiene coma decimal
+    clean = clean.replace(',', '.');
+  }
+  const n = parseFloat(clean);
+  return isNaN(n) ? 0 : n;
+}
 
 if (typeof Chart !== 'undefined') {
   Chart.defaults.color = PALETTE.text;
@@ -49,10 +72,9 @@ async function loadLiveExcelData() {
   const contentEl = document.getElementById('dashboardContent');
 
   try {
-    console.log("Iniciando descarga en paralelo de pestañas independientes (V24-V26)...");
+    console.log("Iniciando descarga en paralelo de pestañas independientes...");
     historicalStore = {}; 
 
-    // Descargar cada pestaña de forma específica e independiente para evitar cruce de datos
     const fetchPromises = HOJAS_CONFIG.map(async (hoja) => {
       const urlConHoja = `${SPREADSHEET_BASE_URL}&sheet=${encodeURIComponent(hoja.nombreHoja)}`;
       
@@ -64,7 +86,7 @@ async function loadLiveExcelData() {
       const csvText = await response.text();
       
       if (csvText.substring(0, 100).includes("<!DOCTYPE") || csvText.substring(0, 100).includes("<html")) {
-        throw new Error(`La pestaña ${hoja.nombreHoja} no está disponible de forma pública.`);
+        throw new Error(`La pestaña ${hoja.nombreHoja} no está disponible públicamente.`);
       }
 
       processCSVDataForYear(csvText, hoja.anio);
@@ -95,7 +117,7 @@ async function loadLiveExcelData() {
   }
 }
 
-// ── Parseador de CSV Tolerante con Comas Internas ────────────────────────────
+// Parseador tolerante a comas en textos de productos
 function parseCSVRows(text) {
   const lines = text.split(/\r?\n/);
   return lines.map(line => {
@@ -121,7 +143,6 @@ function parseCSVRows(text) {
 // ── Procesador Adaptativo por Año Específico ────────────────────────────────
 function processCSVDataForYear(csvText, yearKey) {
   const json = parseCSVRows(csvText);
-
   if (json.length < 2) return; 
 
   let hdrIdx = -1;
@@ -139,7 +160,7 @@ function processCSVDataForYear(csvText, yearKey) {
   const col = {}; 
   headers.forEach((h, i) => { col[h] = i; });
 
-  // Mapeos exactos solicitados
+  // Indexadores mapeados con tus nombres exactos
   const idxNV     = col['NV'] ?? 0;
   const idxQTY    = col['QTY'] ?? col['CANTIDAD'] ?? 2;
   const idxPN     = col['PN'] ?? col['PART NUMBER'] ?? 3;
@@ -156,11 +177,14 @@ function processCSVDataForYear(csvText, yearKey) {
 
   for (let i = hdrIdx + 1; i < json.length; i++) {
     const r = json[i];
-    if (!r || r.length === 0 || !r[idxNV]) continue; 
+    if (!r || r.length === 0) continue; 
 
-    // CRÍTICO: Ignorar filas acumuladoras o totales de la parte inferior de la hoja
-    const nvString = String(r[idxNV]).toUpperCase();
-    if (nvString.includes("TOTAL") || nvString.includes("SUMA") || !r[idxProd]) continue;
+    const nvVal = String(r[idxNV] || '').trim();
+    const prodVal = String(r[idxProd] || '').trim();
+    
+    // FILTROS CRÍTICOS: Omitir filas vacías, comentarios o totales sumados abajo en tu Excel
+    if (!nvVal || nvVal === "" || nvVal.toUpperCase().includes("TOTAL") || nvVal.toUpperCase().includes("SUMA")) continue;
+    if (!prodVal || prodVal === "" || prodVal.toUpperCase().includes("TOTAL")) continue;
 
     let diaCalculado = "15"; 
     if (idxDia !== -1 && r[idxDia]) {
@@ -168,10 +192,10 @@ function processCSVDataForYear(csvText, yearKey) {
     }
 
     const rowObj = {
-      nv:       nvString.trim(),
-      qty:      safeNum(r[idxQTY]),
+      nv:       nvVal,
+      qty:      safeNum(r[idxQTY]) || 0,
       pn:       String(r[idxPN] || '').trim(),
-      producto: String(r[idxProd] || r[idxPN] || 'Indefinido').trim(),
+      producto: prodVal,
       portal:   String(r[idxPortal] || 'Otros').trim().toUpperCase(),
       venta:    safeNum(r[idxVenta]),
       docTipo:  String(r[idxDoc] || 'N/A').trim().toUpperCase().replace(/\s+/g,''),
@@ -179,11 +203,14 @@ function processCSVDataForYear(csvText, yearKey) {
       dia:      parseInt(diaCalculado) || 1
     };
 
-    historicalStore[yearKey].push(rowObj);
+    // Solo guardar si el registro tiene un valor monetario o unidades lógicas
+    if (rowObj.qty > 0 || rowObj.venta > 0) {
+      historicalStore[yearKey].push(rowObj);
+    }
   }
 }
 
-// ── Inicialización de Controles y Eventos ───────────────────────────────────
+// ── Inicialización de Controles ──────────────────────────────────────────────
 function initDashboardSelectors() {
   const disponibles = Object.keys(historicalStore).sort((a,b) => b-a); 
   
@@ -217,18 +244,19 @@ function initDashboardSelectors() {
     if(sCompB) sCompB.value = disponibles[0];
   }
 
-  // Vincular directamente el cambio del select nativo de tu HTML
+  // Vincular cambio dinámico
   if (sSingle) {
     sSingle.addEventListener('change', (e) => {
       activeYear = e.target.value;
       triggerSingleYearCalculations();
     });
   }
+  if (sCompA) sCompA.addEventListener('change', runComparison);
+  if (sCompB) sCompB.addEventListener('change', runComparison);
 
   triggerSingleYearCalculations();
 }
 
-// ── Manejo de Filtros e Interfaz ────────────────────────────
 function changeSingleYear() {
   const select = document.getElementById('selectSingleYear');
   if (select) {
@@ -241,13 +269,13 @@ function switchViewMode(mode) {
   const ts = document.getElementById('tabSingle'), tc = document.getElementById('tabCompare');
   const vs = document.getElementById('viewSingle'), vc = document.getElementById('viewCompare');
   if (mode === 'single') {
-    if(ts) ts.className = "pb-3 text-indigo-400 border-b-2 border-indigo-500 font-semibold transition-all";
-    if(tc) tc.className = "pb-3 text-slate-400 hover:text-white transition-all flex items-center gap-2";
+    if(ts) ts.className = "pb-3 text-indigo-400 border-b-2 border-indigo-500 font-semibold transition-all cursor-pointer";
+    if(tc) tc.className = "pb-3 text-slate-400 hover:text-white transition-all flex items-center gap-2 cursor-pointer";
     if(vs) vs.classList.remove('hidden'); if(vc) vc.classList.add('hidden');
     triggerSingleYearCalculations();
   } else {
-    if(tc) tc.className = "pb-3 text-indigo-400 border-b-2 border-indigo-500 font-semibold transition-all flex items-center gap-2";
-    if(ts) ts.className = "pb-3 text-slate-400 hover:text-white transition-all";
+    if(tc) tc.className = "pb-3 text-indigo-400 border-b-2 border-indigo-500 font-semibold transition-all flex items-center gap-2 cursor-pointer";
+    if(ts) ts.className = "pb-3 text-slate-400 hover:text-white transition-all cursor-pointer";
     if(vc) vc.classList.remove('hidden'); if(vs) vs.classList.add('hidden');
     runComparison();
   }
@@ -313,26 +341,26 @@ function byKey(data, key, limitFn) {
   return limitFn ? limitFn(arr) : arr;
 }
 
-// ── Renderizado y Cálculos del Cuadro de Mando Principal ────────────────────
+// ── ANÁLISIS Y SUMAS EXACTAS SOLICITADAS ─────────────────────────────────────
 function renderSingleDashboard() {
   const data = filteredData;
   
-  // 1. Recaudación Total ($) -> PRECIO VENTA
-  const totalVentas = data.reduce((s,r) => s + r.venta, 0);
+  // 1. ¿Cuánto dinero se lleva recaudado? -> SUMA DE PRECIO VENTA
+  const totalVentas = data.reduce((s, r) => s + r.venta, 0);
   
-  // 2. Cantidad de Ventas hechas -> Conteo de transacciones válidas
+  // 2. ¿Cuántas ventas se hicieron? -> Conteo de registros (Excluyendo nulos/totales)
   const totalOrders = data.length;
   
-  // 3. Unidades totales vendidas -> QTY
-  const totalQty = data.reduce((s,r) => s + r.qty, 0);
+  // 3. ¿Cuántas unidades se vendieron? -> SUMA DE QTY
+  const totalQty = data.reduce((s, r) => s + r.qty, 0);
 
-  // Inyectar en elementos KPI de index.html
+  // Inyectar valores numéricos formateados en las tarjetas superiores de tu HTML
   if(document.getElementById('kpiVentas')) document.getElementById('kpiVentas').textContent = fmtFull(totalVentas);
   if(document.getElementById('kpiVentasOrders')) document.getElementById('kpiVentasOrders').textContent = totalOrders.toLocaleString('es-CL');
   if(document.getElementById('kpiVentasQty')) document.getElementById('kpiVentasQty').textContent = totalQty.toLocaleString('es-CL');
   if(document.getElementById('kpiTicket')) document.getElementById('kpiTicket').textContent = totalOrders > 0 ? fmtFull(totalVentas/totalOrders) : '$0';
 
-  // Gráfico de Productos (VALIDACIÓN KIT)
+  // Actualizar gráficos asociados
   destroyChart('prod');
   const prods = byKey(data, 'producto', a => a.slice(0,10));
   const ctxProd = document.getElementById('chartProductos');
@@ -343,7 +371,6 @@ function renderSingleDashboard() {
     });
   }
 
-  // Gráfico Circular de Market Share
   destroyChart('donut');
   let ports = byKey(data, 'portal').filter(p => p.label.trim().toUpperCase() !== "TOTAL GENERAL" && p.label.trim().toUpperCase() !== "N/A" && p.ventas > 0);
   const totalP = ports.reduce((s,p)=>s+p.ventas, 0);
@@ -364,7 +391,6 @@ function renderSingleDashboard() {
     });
   }
 
-  // Línea Temporal Mensual
   destroyChart('line');
   const mData = {}; data.forEach(r => { if(r.mes) mData[r.mes] = (mData[r.mes]||0)+r.venta; });
   const sortedM = Object.keys(mData).sort((a,b)=>+a-+b);
@@ -383,14 +409,14 @@ function renderSingleDashboard() {
   const ctxOpsT = document.getElementById('chartTicketPortal');
   if(ctxOpsT) charts['opsT'] = new Chart(ctxOpsT, { type: 'bar', data: { labels:ports.map(p=>p.label), datasets:[{ data:ports.map(p=>Math.round(p.ventas/p.orders)), backgroundColor:'#3b82f6' }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} }, scales:{ y:{ticks:{callback:v=>fmtFull(v)}} } } });
 
-  // Tabla Desplegada Consolidada por SKU (VALIDACIÓN KIT)
+  // 4. ¿Cuáles son los productos (VALIDACIÓN KIT) que se vendieron? -> Rellenar la Tabla
   const allProds = byKey(data, 'producto');
   if(document.getElementById('tableProdCount')) document.getElementById('tableProdCount').textContent = `${allProds.length} SKUs`;
   
   const tbody = document.getElementById('productTableBody'); 
   if (tbody) {
     tbody.innerHTML = '';
-    allProds.forEach((p,i) => {
+    allProds.forEach((p, i) => {
       tbody.innerHTML += `
         <tr class="hover:bg-slate-900 text-slate-300 border-b border-slate-900">
           <td class="p-3 text-slate-600">${i+1}</td>
@@ -440,10 +466,17 @@ function runComparison() {
   }
 }
 
-// ── Inicialización ──────────────────────────────────────────────────────────
+// ── Inicialización Inicial ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadLiveExcelData();
+  
   ['filterPortal','filterMes','filterDoc'].forEach(id => {
-    const el = document.getElementById(id); if (el) el.addEventListener('change', applyFilters);
+    const el = document.getElementById(id); 
+    if (el) el.addEventListener('change', applyFilters);
   });
+
+  const tabSingle = document.getElementById('tabSingle');
+  const tabCompare = document.getElementById('tabCompare');
+  if(tabSingle) tabSingle.addEventListener('click', () => switchViewMode('single'));
+  if(tabCompare) tabCompare.addEventListener('click', () => switchViewMode('compare'));
 });
