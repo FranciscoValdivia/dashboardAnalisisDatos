@@ -4,8 +4,6 @@ const SPREADSHEET_BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR
 
 // Definición explícita de las pestañas de tu Google Sheet
 const HOJAS_CONFIG = [
-  { anio: "2022", nombreHoja: "V22" },
-  { anio: "2023", nombreHoja: "V23" },
   { anio: "2024", nombreHoja: "V24" },
   { anio: "2025", nombreHoja: "V25" },
   { anio: "2026", nombreHoja: "V26" }
