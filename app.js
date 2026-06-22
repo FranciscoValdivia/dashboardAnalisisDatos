@@ -1,8 +1,7 @@
 // ── CONFIGURACIÓN DE ORIGEN DE DATOS DIRECTO (GOOGLE SHEETS POR PESTAÑAS) ──
-// Base del documento (extraída de tu URL original)
 const SPREADSHEET_BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTYiU1nxu_oBNnGxEf8E4NU2_ibEZNq0Pn0o521_28fNTDBb8KBNOKm5KTchiRCjw/pub?output=csv";
 
-// Definición explícita de las pestañas activas en tu Google Sheet (Actualizado: 2024 - 2026)
+// Definición de las pestañas actuales en tu Google Sheet
 const HOJAS_CONFIG = [
   { anio: "2024", nombreHoja: "V24" },
   { anio: "2025", nombreHoja: "V25" },
@@ -53,9 +52,7 @@ async function loadLiveExcelData() {
     console.log("Iniciando descarga simultánea de pestañas históricas (V24-V26)...");
     historicalStore = {}; 
 
-    // Crear promesas de descarga para cada pestaña de forma paralela
     const fetchPromises = HOJAS_CONFIG.map(async (hoja) => {
-      // Forzar a la URL de publicación a pedir la pestaña específica por su nombre
       const urlConHoja = `${SPREADSHEET_BASE_URL}&sheet=${encodeURIComponent(hoja.nombreHoja)}`;
       
       const response = await fetch(urlConHoja);
@@ -69,11 +66,9 @@ async function loadLiveExcelData() {
         throw new Error(`La pestaña ${hoja.nombreHoja} no está disponible públicamente.`);
       }
 
-      // Procesar datos asignándole el año correspondiente
       processCSVDataForYear(csvText, hoja.anio);
     });
 
-    // Esperar a que se completen todas las descargas
     await Promise.all(fetchPromises);
 
     if (loadingEl) loadingEl.classList.add('hidden');
@@ -90,10 +85,6 @@ async function loadLiveExcelData() {
           <p class="text-slate-300 text-sm max-w-md mx-auto bg-rose-500/10 border border-rose-500/20 p-3 rounded-lg font-mono">
             ${err.message}
           </p>
-          <div class="p-4 bg-slate-900 border border-slate-800 rounded-lg text-left text-xs text-slate-400 max-w-xl mx-auto space-y-2">
-            <p class="font-bold text-indigo-400">Verificación Crítica para Varias Hojas:</p>
-            <p>Asegúrate de que al ir a <strong>Archivo > Compartir > Publicar en la web</strong>, hayas seleccionado publicar <strong>"Todo el documento"</strong> como CSV, y no únicamente una pestaña individual.</p>
-          </div>
           <button onclick="location.reload()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition-all">
             Reintentar Conexión
           </button>
@@ -130,9 +121,8 @@ function parseCSVRows(text) {
 function processCSVDataForYear(csvText, yearKey) {
   const json = parseCSVRows(csvText);
 
-  if (json.length < 2) return; // Pestaña vacía o sin datos suficientes
+  if (json.length < 2) return; 
 
-  // Buscar fila de cabeceras de forma dinámica
   let hdrIdx = -1;
   for (let i = 0; i < Math.min(30, json.length); i++) {
     const rowClean = json[i].map(c => String(c||'').trim().toUpperCase());
@@ -148,6 +138,7 @@ function processCSVDataForYear(csvText, yearKey) {
   const col = {}; 
   headers.forEach((h, i) => { col[h] = i; });
 
+  // Mapeos exactos solicitados por el usuario
   const idxNV     = col['NV'] ?? 0;
   const idxQTY    = col['QTY'] ?? col['CANTIDAD'] ?? 2;
   const idxPN     = col['PN'] ?? col['PART NUMBER'] ?? 3;
@@ -166,6 +157,9 @@ function processCSVDataForYear(csvText, yearKey) {
     const r = json[i];
     if (!r || r.length === 0 || !r[idxNV]) continue; 
 
+    // Omitir filas de totales sumatorizados nativos de Excel si existen
+    if (String(r[idxNV]).toUpperCase().includes("TOTAL")) continue;
+
     let diaCalculado = "15"; 
     if (idxDia !== -1 && r[idxDia]) {
       diaCalculado = String(r[idxDia]).trim();
@@ -173,7 +167,7 @@ function processCSVDataForYear(csvText, yearKey) {
 
     const rowObj = {
       nv:       String(r[idxNV]),
-      qty:      safeNum(r[idxQTY]) || 1,
+      qty:      safeNum(r[idxQTY]) || 0,
       pn:       String(r[idxPN] || '').trim(),
       producto: String(r[idxProd] || r[idxPN] || 'Indefinido').trim(),
       portal:   String(r[idxPortal] || 'Otros').trim().toUpperCase(),
@@ -187,9 +181,8 @@ function processCSVDataForYear(csvText, yearKey) {
   }
 }
 
-// ── Inicialización de Controles ──────────────────────────────
+// ── Inicialización de Controles y Selectores ──────────────────────────────
 function initDashboardSelectors() {
-  // Ordenar los años de forma descendente (2026 primero, hasta 2024)
   const disponibles = Object.keys(historicalStore).sort((a,b) => b-a); 
   
   if (disponibles.length === 0) {
@@ -222,32 +215,36 @@ function initDashboardSelectors() {
     if(sCompB) sCompB.value = disponibles[0];
   }
 
+  // Vincular eventos de cambio directamente aquí para asegurar consistencia
+  if (sSingle) {
+    sSingle.addEventListener('change', (e) => {
+      activeYear = e.target.value;
+      triggerSingleYearCalculations();
+    });
+  }
+
+  if (sCompA) sCompA.addEventListener('change', runComparison);
+  if (sCompB) sCompB.addEventListener('change', runComparison);
+
   triggerSingleYearCalculations();
 }
 
-// ── Módulo de Filtros y Renderers ────────────────────────────
+// ── Módulo de Filtros e Interfaz ────────────────────────────
 function switchViewMode(mode) {
   const ts = document.getElementById('tabSingle'), tc = document.getElementById('tabCompare');
   const vs = document.getElementById('viewSingle'), vc = document.getElementById('viewCompare');
   if (mode === 'single') {
-    if(ts) ts.className = "pb-3 text-indigo-400 border-b-2 border-indigo-500 font-semibold transition-all";
-    if(tc) tc.className = "pb-3 text-slate-400 hover:text-white transition-all flex items-center gap-2";
+    if(ts) ts.className = "pb-3 text-indigo-400 border-b-2 border-indigo-500 font-semibold transition-all cursor-pointer";
+    if(tc) tc.className = "pb-3 text-slate-400 hover:text-white transition-all flex items-center gap-2 cursor-pointer";
     if(vs) vs.classList.remove('hidden'); if(vc) vc.classList.add('hidden');
     triggerSingleYearCalculations();
   } else {
-    if(tc) tc.className = "pb-3 text-indigo-400 border-b-2 border-indigo-500 font-semibold transition-all flex items-center gap-2";
-    if(ts) ts.className = "pb-3 text-slate-400 hover:text-white transition-all";
+    if(tc) tc.className = "pb-3 text-indigo-400 border-b-2 border-indigo-500 font-semibold transition-all flex items-center gap-2 cursor-pointer";
+    if(ts) ts.className = "pb-3 text-slate-400 hover:text-white transition-all cursor-pointer";
     if(vc) vc.classList.remove('hidden'); if(vs) vs.classList.add('hidden');
     runComparison();
   }
 }
-
-function changeSingleYear() {
-  activeYear = document.getElementById('selectSingleYear').value;
-  triggerSingleYearCalculations();
-}
-
-// ... (El resto del código de renderizado y eventos se mantiene idéntico)
 
 function triggerSingleYearCalculations() {
   const data = historicalStore[activeYear] || [];
@@ -288,7 +285,9 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  document.getElementById('filterPortal').value = ''; document.getElementById('filterMes').value = ''; document.getElementById('filterDoc').value = '';
+  if(document.getElementById('filterPortal')) document.getElementById('filterPortal').value = ''; 
+  if(document.getElementById('filterMes')) document.getElementById('filterMes').value = ''; 
+  if(document.getElementById('filterDoc')) document.getElementById('filterDoc').value = '';
   filteredData = [...(historicalStore[activeYear] || [])];
   renderSingleDashboard();
 }
@@ -298,82 +297,126 @@ function byKey(data, key, limitFn) {
   data.forEach(r => {
     const k = r[key] || 'Sin especificar';
     if (!map[k]) map[k] = { ventas:0, orders:0, qty:0 };
-    map[k].ventas += r.venta; map[k].orders += 1; map[k].qty += r.qty;
+    map[k].ventas += r.venta; 
+    map[k].orders += 1; 
+    map[k].qty += r.qty;
   });
   let arr = Object.entries(map).map(([label, v]) => ({ label, ...v }));
   arr.sort((a,b) => b.ventas - a.ventas);
   return limitFn ? limitFn(arr) : arr;
 }
 
+// ── Renderizado del Dashboard y Cálculos Principales ────────────────────────
 function renderSingleDashboard() {
   const data = filteredData;
-  const totalVentas = data.reduce((s,r)=>s+r.venta, 0);
+  
+  // 1. ¿Cuánto dinero se lleva recaudado? -> SUMA DE PRECIO VENTA
+  const totalVentas = data.reduce((s,r) => s + r.venta, 0);
+  
+  // 2. ¿Cuántas ventas se hicieron? -> Conteo de registros válidos (órdenes de venta)
   const totalOrders = data.length;
+  
+  // 3. ¿Cuántas unidades se vendieron? -> SUMA DE QTY
+  const totalQty = data.reduce((s,r) => s + r.qty, 0);
 
-  document.getElementById('kpiVentas').textContent = fmtFull(totalVentas);
-  document.getElementById('kpiVentasOrders').textContent = totalOrders.toLocaleString('es-CL');
-  document.getElementById('kpiVentasQty').textContent = data.reduce((s,r)=>s+r.qty,0).toLocaleString('es-CL');
-  document.getElementById('kpiTicket').textContent = totalOrders > 0 ? fmtFull(totalVentas/totalOrders) : '$0';
+  // Pintar KPIs principales en pantalla
+  if(document.getElementById('kpiVentas')) document.getElementById('kpiVentas').textContent = fmtFull(totalVentas);
+  if(document.getElementById('kpiVentasOrders')) document.getElementById('kpiVentasOrders').textContent = totalOrders.toLocaleString('es-CL');
+  if(document.getElementById('kpiVentasQty')) document.getElementById('kpiVentasQty').textContent = totalQty.toLocaleString('es-CL');
+  if(document.getElementById('kpiTicket')) document.getElementById('kpiTicket').textContent = totalOrders > 0 ? fmtFull(totalVentas/totalOrders) : '$0';
 
+  // Gráfico de Productos (Top 10) basado en VALIDACIÓN KIT
   destroyChart('prod');
   const prods = byKey(data, 'producto', a => a.slice(0,10));
-  charts['prod'] = new Chart(document.getElementById('chartProductos'), {
-    type: 'bar', data: { labels: prods.map(p=>p.label.substring(0,25)), datasets:[{ label:'Ingresos', data:prods.map(p=>p.ventas), backgroundColor:'#6366f1' }] },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} }, scales:baseScales() }
-  });
+  const ctxProd = document.getElementById('chartProductos');
+  if (ctxProd) {
+    charts['prod'] = new Chart(ctxProd, {
+      type: 'bar', data: { labels: prods.map(p=>p.label.substring(0,25)), datasets:[{ label:'Ingresos', data:prods.map(p=>p.ventas), backgroundColor:'#6366f1' }] },
+      options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} }, scales:baseScales() }
+    });
+  }
 
+  // Gráfico Donut de Canales/Portales
   destroyChart('donut');
   let ports = byKey(data, 'portal').filter(p => p.label.trim().toUpperCase() !== "TOTAL GENERAL" && p.label.trim().toUpperCase() !== "N/A" && p.ventas > 0);
   const totalP = ports.reduce((s,p)=>s+p.ventas, 0);
   
-  charts['donut'] = new Chart(document.getElementById('chartPortalDonut'), {
-    type: 'doughnut', data: { labels:ports.map(p=>p.label), datasets:[{ data:ports.map(p=>p.ventas), backgroundColor:ports.map(p=>getPortalColor(p.label)), borderWidth:0 }] },
-    options: { responsive:true, maintainAspectRatio:false, cutout:'70%', plugins:{ legend:{display:false} } }
-  });
+  const ctxDonut = document.getElementById('chartPortalDonut');
+  if (ctxDonut) {
+    charts['donut'] = new Chart(ctxDonut, {
+      type: 'doughnut', data: { labels:ports.map(p=>p.label), datasets:[{ data:ports.map(p=>p.ventas), backgroundColor:ports.map(p=>getPortalColor(p.label)), borderWidth:0 }] },
+      options: { responsive:true, maintainAspectRatio:false, cutout:'70%', plugins:{ legend:{display:false} } }
+    });
+  }
 
-  const leg = document.getElementById('portalLegend'); leg.innerHTML = '';
-  ports.forEach(p => {
-    leg.innerHTML += `<div class="flex items-center justify-between text-xs text-slate-400"><span class="truncate flex items-center gap-1.5"><span class="w-2 h-2 rounded-sm" style="background:${getPortalColor(p.label)}"></span>${p.label}</span><span class="font-mono text-white font-medium">${fmtFull(p.ventas)} (${totalP > 0 ? ((p.ventas/totalP)*100).toFixed(1) : 0}%)</span></div>`;
-  });
+  const leg = document.getElementById('portalLegend'); 
+  if (leg) {
+    leg.innerHTML = '';
+    ports.forEach(p => {
+      leg.innerHTML += `<div class="flex items-center justify-between text-xs text-slate-400"><span class="truncate flex items-center gap-1.5"><span class="w-2 h-2 rounded-sm" style="background:${getPortalColor(p.label)}"></span>${p.label}</span><span class="font-mono text-white font-medium">${fmtFull(p.ventas)} (${totalP > 0 ? ((p.ventas/totalP)*100).toFixed(1) : 0}%)</span></div>`;
+    });
+  }
 
+  // Gráfico de Tendencia Mensual
   destroyChart('line');
   const mData = {}; data.forEach(r => { if(r.mes) mData[r.mes] = (mData[r.mes]||0)+r.venta; });
   const sortedM = Object.keys(mData).sort((a,b)=>+a-+b);
-  charts['line'] = new Chart(document.getElementById('chartMensual'), {
-    type: 'line', data: { labels:sortedM.map(m=>MESES_NAMES[m]||m), datasets:[{ label:'Ventas', data:sortedM.map(m=>mData[m]), borderColor:'#10b981', tension:0.2, fill:false }] },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} }, scales:baseScales() }
-  });
+  const ctxLine = document.getElementById('chartMensual');
+  if (ctxLine) {
+    charts['line'] = new Chart(ctxLine, {
+      type: 'line', data: { labels:sortedM.map(m=>MESES_NAMES[m]||m), datasets:[{ label:'Ventas', data:sortedM.map(m=>mData[m]), borderColor:'#10b981', tension:0.2, fill:false }] },
+      options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} }, scales:baseScales() }
+    });
+  }
 
   destroyChart('opsO'); destroyChart('opsT');
-  charts['opsO'] = new Chart(document.getElementById('chartOrdenesPortal'), { type: 'bar', data: { labels:ports.map(p=>p.label), datasets:[{ data:ports.map(p=>p.orders), backgroundColor:'#8b5cf6' }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} } } });
-  charts['opsT'] = new Chart(document.getElementById('chartTicketPortal'), { type: 'bar', data: { labels:ports.map(p=>p.label), datasets:[{ data:ports.map(p=>Math.round(p.ventas/p.orders)), backgroundColor:'#3b82f6' }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} }, scales:{ y:{ticks:{callback:v=>fmtFull(v)}} } } });
+  const ctxOpsO = document.getElementById('chartOrdenesPortal');
+  if(ctxOpsO) charts['opsO'] = new Chart(ctxOpsO, { type: 'bar', data: { labels:ports.map(p=>p.label), datasets:[{ data:ports.map(p=>p.orders), backgroundColor:'#8b5cf6' }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} } } });
+  
+  const ctxOpsT = document.getElementById('chartTicketPortal');
+  if(ctxOpsT) charts['opsT'] = new Chart(ctxOpsT, { type: 'bar', data: { labels:ports.map(p=>p.label), datasets:[{ data:ports.map(p=>Math.round(p.ventas/p.orders)), backgroundColor:'#3b82f6' }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} }, scales:{ y:{ticks:{callback:v=>fmtFull(v)}} } } });
 
+  // Tabla completa de Productos (VALIDACIÓN KIT) con Cantidades Exactas
   const allProds = byKey(data, 'producto');
-  document.getElementById('tableProdCount').textContent = `${allProds.length} SKUs`;
-  const tbody = document.getElementById('productTableBody'); tbody.innerHTML = '';
-  allProds.forEach((p,i) => {
-    tbody.innerHTML += `<tr class="hover:bg-slate-900 text-slate-300 border-b border-slate-900"><td class="p-3 text-slate-600">${i+1}</td><td class="p-3 text-white font-medium truncate max-w-sm" title="${p.label}">${p.label}</td><td class="p-3 text-right font-mono">${p.orders}</td><td class="p-3 text-right font-mono">${p.qty}</td><td class="p-3 text-right text-emerald-400 font-mono font-semibold">${fmtFull(p.ventas)}</td></tr>`;
-  });
+  if(document.getElementById('tableProdCount')) document.getElementById('tableProdCount').textContent = `${allProds.length} SKUs`;
+  
+  const tbody = document.getElementById('productTableBody'); 
+  if (tbody) {
+    tbody.innerHTML = '';
+    allProds.forEach((p,i) => {
+      tbody.innerHTML += `
+        <tr class="hover:bg-slate-900 text-slate-300 border-b border-slate-900">
+          <td class="p-3 text-slate-600">${i+1}</td>
+          <td class="p-3 text-white font-medium truncate max-w-sm" title="${p.label}">${p.label}</td>
+          <td class="p-3 text-right font-mono">${p.orders}</td>
+          <td class="p-3 text-right font-mono">${p.qty}</td>
+          <td class="p-3 text-right text-emerald-400 font-mono font-semibold">${fmtFull(p.ventas)}</td>
+        </tr>`;
+    });
+  }
 }
 
+// ── Renderizado del Módulo Comparativo Interanual ──────────────────────────
 function runComparison() {
   const yearA = document.getElementById('compareYearA').value;
   const yearB = document.getElementById('compareYearB').value;
   const dataA = historicalStore[yearA] || []; const dataB = historicalStore[yearB] || [];
   const totalA = dataA.reduce((sum, r) => sum + r.venta, 0); const totalB = dataB.reduce((sum, r) => sum + r.venta, 0);
 
-  document.getElementById('kpiCompA').textContent = fmtFull(totalA);
-  document.getElementById('subCompA').textContent = `${dataA.length.toLocaleString('es-CL')} órdenes`;
-  document.getElementById('kpiCompB').textContent = fmtFull(totalB);
-  document.getElementById('subCompB').textContent = `${dataB.length.toLocaleString('es-CL')} órdenes`;
+  if(document.getElementById('kpiCompA')) document.getElementById('kpiCompA').textContent = fmtFull(totalA);
+  if(document.getElementById('subCompA')) document.getElementById('subCompA').textContent = `${dataA.length.toLocaleString('es-CL')} órdenes`;
+  if(document.getElementById('kpiCompB')) document.getElementById('kpiCompB').textContent = fmtFull(totalB);
+  if(document.getElementById('subCompB')) document.getElementById('subCompB').textContent = `${dataB.length.toLocaleString('es-CL')} órdenes`;
 
   const badge = document.getElementById('badgeCrecimiento');
-  if (totalA > 0) {
-    const delta = ((totalB - totalA) / totalA) * 100;
-    badge.textContent = (delta >= 0 ? '▲ +' : '▼ ') + delta.toFixed(1) + '%';
-    badge.className = `text-xs px-2 py-1 rounded font-bold ${delta >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`;
-  } else {
-    badge.textContent = '0%'; badge.className = 'bg-slate-800 text-slate-400 text-xs px-2 py-1 rounded';
+  if (badge) {
+    if (totalA > 0) {
+      const delta = ((totalB - totalA) / totalA) * 100;
+      badge.textContent = (delta >= 0 ? '▲ +' : '▼ ') + delta.toFixed(1) + '%';
+      badge.className = `text-xs px-2 py-1 rounded font-bold ${delta >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`;
+    } else {
+      badge.textContent = '0%'; badge.className = 'bg-slate-800 text-slate-400 text-xs px-2 py-1 rounded';
+    }
   }
 
   destroyChart('compMeses');
@@ -381,25 +424,42 @@ function runComparison() {
   dataA.forEach(r => { const m = parseInt(r.mes); if(m >= 1 && m <= 12) mesesA[m-1] += r.venta; });
   dataB.forEach(r => { const m = parseInt(r.mes); if(m >= 1 && m <= 12) mesesB[m-1] += r.venta; });
 
-  charts['compMeses'] = new Chart(document.getElementById('chartCompMeses'), {
-    type: 'bar', data: { labels: ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'], datasets: [ { label: `Año ${yearA}`, data: mesesA, backgroundColor: '#6366f1' }, { label: `Año ${yearB}`, data: mesesB, backgroundColor: '#10b981' } ] },
-    options: { responsive: true, maintainAspectRatio: false, scales: baseScales() }
-  });
+  const ctxCompM = document.getElementById('chartCompMeses');
+  if (ctxCompM) {
+    charts['compMeses'] = new Chart(ctxCompM, {
+      type: 'bar', data: { labels: ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'], datasets: [ { label: `Año ${yearA}`, data: mesesA, backgroundColor: '#6366f1' }, { label: `Año ${yearB}`, data: mesesB, backgroundColor: '#10b981' } ] },
+      options: { responsive: true, maintainAspectRatio: false, scales: baseScales() }
+    });
+  }
 
   destroyChart('compDias');
   const diasA = Array(31).fill(0), diasB = Array(31).fill(0);
   dataA.forEach(r => { if(r.dia >= 1 && r.dia <= 31) diasA[r.dia - 1] += r.venta; });
   dataB.forEach(r => { if(r.dia >= 1 && r.dia <= 31) diasB[r.dia - 1] += r.venta; });
 
-  charts['compDias'] = new Chart(document.getElementById('chartCompDias'), {
-    type: 'line', data: { labels: Array.from({length: 31}, (_, i) => String(i + 1)), datasets: [ { label: `Año ${yearA}`, data: diasA, borderColor: '#6366f1', tension: 0.2, fill: false }, { label: `Año ${yearB}`, data: diasB, borderColor: '#10b981', tension: 0.2, fill: false } ] },
-    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: baseScales() }
-  });
+  const ctxCompD = document.getElementById('chartCompDias');
+  if (ctxCompD) {
+    charts['compDias'] = new Chart(ctxCompD, {
+      type: 'line', data: { labels: Array.from({length: 31}, (_, i) => String(i + 1)), datasets: [ { label: `Año ${yearA}`, data: diasA, borderColor: '#6366f1', tension: 0.2, fill: false }, { label: `Año ${yearB}`, data: diasB, borderColor: '#10b981', tension: 0.2, fill: false } ] },
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: baseScales() }
+    });
+  }
 }
 
+// ── Inicializador de Carga del DOM ──────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadLiveExcelData();
+  
+  // Vincular selectores de filtrado secundario
   ['filterPortal','filterMes','filterDoc'].forEach(id => {
-    const el = document.getElementById(id); if (el) el.addEventListener('change', applyFilters);
+    const el = document.getElementById(id); 
+    if (el) el.addEventListener('change', applyFilters);
   });
+
+  // Vincular clics de las pestañas superiores (Vista Única vs Comparativa)
+  const tabSingle = document.getElementById('tabSingle');
+  const tabCompare = document.getElementById('tabCompare');
+  
+  if(tabSingle) tabSingle.addEventListener('click', () => switchViewMode('single'));
+  if(tabCompare) tabCompare.addEventListener('click', () => switchViewMode('compare'));
 });
