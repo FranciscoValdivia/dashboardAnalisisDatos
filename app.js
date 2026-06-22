@@ -1,7 +1,7 @@
 // ── CONFIGURACIÓN DE ORIGEN DE DATOS DIRECTO (GOOGLE SHEETS POR PESTAÑAS) ──
 const SPREADSHEET_BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTYiU1nxu_oBNnGxEf8E4NU2_ibEZNq0Pn0o521_28fNTDBb8KBNOKm5KTchiRCjw/pub?output=csv";
 
-// Definición de las pestañas actuales en tu Google Sheet
+// Mapeo explícito a las pestañas independientes de tu Google Sheet
 const HOJAS_CONFIG = [
   { anio: "2024", nombreHoja: "V24" },
   { anio: "2025", nombreHoja: "V25" },
@@ -49,9 +49,10 @@ async function loadLiveExcelData() {
   const contentEl = document.getElementById('dashboardContent');
 
   try {
-    console.log("Iniciando descarga simultánea de pestañas históricas (V24-V26)...");
+    console.log("Iniciando descarga en paralelo de pestañas independientes (V24-V26)...");
     historicalStore = {}; 
 
+    // Descargar cada pestaña de forma específica e independiente para evitar cruce de datos
     const fetchPromises = HOJAS_CONFIG.map(async (hoja) => {
       const urlConHoja = `${SPREADSHEET_BASE_URL}&sheet=${encodeURIComponent(hoja.nombreHoja)}`;
       
@@ -63,7 +64,7 @@ async function loadLiveExcelData() {
       const csvText = await response.text();
       
       if (csvText.substring(0, 100).includes("<!DOCTYPE") || csvText.substring(0, 100).includes("<html")) {
-        throw new Error(`La pestaña ${hoja.nombreHoja} no está disponible públicamente.`);
+        throw new Error(`La pestaña ${hoja.nombreHoja} no está disponible de forma pública.`);
       }
 
       processCSVDataForYear(csvText, hoja.anio);
@@ -138,7 +139,7 @@ function processCSVDataForYear(csvText, yearKey) {
   const col = {}; 
   headers.forEach((h, i) => { col[h] = i; });
 
-  // Mapeos exactos solicitados por el usuario
+  // Mapeos exactos solicitados
   const idxNV     = col['NV'] ?? 0;
   const idxQTY    = col['QTY'] ?? col['CANTIDAD'] ?? 2;
   const idxPN     = col['PN'] ?? col['PART NUMBER'] ?? 3;
@@ -157,8 +158,9 @@ function processCSVDataForYear(csvText, yearKey) {
     const r = json[i];
     if (!r || r.length === 0 || !r[idxNV]) continue; 
 
-    // Omitir filas de totales sumatorizados nativos de Excel si existen
-    if (String(r[idxNV]).toUpperCase().includes("TOTAL")) continue;
+    // CRÍTICO: Ignorar filas acumuladoras o totales de la parte inferior de la hoja
+    const nvString = String(r[idxNV]).toUpperCase();
+    if (nvString.includes("TOTAL") || nvString.includes("SUMA") || !r[idxProd]) continue;
 
     let diaCalculado = "15"; 
     if (idxDia !== -1 && r[idxDia]) {
@@ -166,8 +168,8 @@ function processCSVDataForYear(csvText, yearKey) {
     }
 
     const rowObj = {
-      nv:       String(r[idxNV]),
-      qty:      safeNum(r[idxQTY]) || 0,
+      nv:       nvString.trim(),
+      qty:      safeNum(r[idxQTY]),
       pn:       String(r[idxPN] || '').trim(),
       producto: String(r[idxProd] || r[idxPN] || 'Indefinido').trim(),
       portal:   String(r[idxPortal] || 'Otros').trim().toUpperCase(),
@@ -181,7 +183,7 @@ function processCSVDataForYear(csvText, yearKey) {
   }
 }
 
-// ── Inicialización de Controles y Selectores ──────────────────────────────
+// ── Inicialización de Controles y Eventos ───────────────────────────────────
 function initDashboardSelectors() {
   const disponibles = Object.keys(historicalStore).sort((a,b) => b-a); 
   
@@ -215,7 +217,7 @@ function initDashboardSelectors() {
     if(sCompB) sCompB.value = disponibles[0];
   }
 
-  // Vincular eventos de cambio directamente aquí para asegurar consistencia
+  // Vincular directamente el cambio del select nativo de tu HTML
   if (sSingle) {
     sSingle.addEventListener('change', (e) => {
       activeYear = e.target.value;
@@ -223,24 +225,29 @@ function initDashboardSelectors() {
     });
   }
 
-  if (sCompA) sCompA.addEventListener('change', runComparison);
-  if (sCompB) sCompB.addEventListener('change', runComparison);
-
   triggerSingleYearCalculations();
 }
 
-// ── Módulo de Filtros e Interfaz ────────────────────────────
+// ── Manejo de Filtros e Interfaz ────────────────────────────
+function changeSingleYear() {
+  const select = document.getElementById('selectSingleYear');
+  if (select) {
+    activeYear = select.value;
+    triggerSingleYearCalculations();
+  }
+}
+
 function switchViewMode(mode) {
   const ts = document.getElementById('tabSingle'), tc = document.getElementById('tabCompare');
   const vs = document.getElementById('viewSingle'), vc = document.getElementById('viewCompare');
   if (mode === 'single') {
-    if(ts) ts.className = "pb-3 text-indigo-400 border-b-2 border-indigo-500 font-semibold transition-all cursor-pointer";
-    if(tc) tc.className = "pb-3 text-slate-400 hover:text-white transition-all flex items-center gap-2 cursor-pointer";
+    if(ts) ts.className = "pb-3 text-indigo-400 border-b-2 border-indigo-500 font-semibold transition-all";
+    if(tc) tc.className = "pb-3 text-slate-400 hover:text-white transition-all flex items-center gap-2";
     if(vs) vs.classList.remove('hidden'); if(vc) vc.classList.add('hidden');
     triggerSingleYearCalculations();
   } else {
-    if(tc) tc.className = "pb-3 text-indigo-400 border-b-2 border-indigo-500 font-semibold transition-all flex items-center gap-2 cursor-pointer";
-    if(ts) ts.className = "pb-3 text-slate-400 hover:text-white transition-all cursor-pointer";
+    if(tc) tc.className = "pb-3 text-indigo-400 border-b-2 border-indigo-500 font-semibold transition-all flex items-center gap-2";
+    if(ts) ts.className = "pb-3 text-slate-400 hover:text-white transition-all";
     if(vc) vc.classList.remove('hidden'); if(vs) vs.classList.add('hidden');
     runComparison();
   }
@@ -306,26 +313,26 @@ function byKey(data, key, limitFn) {
   return limitFn ? limitFn(arr) : arr;
 }
 
-// ── Renderizado del Dashboard y Cálculos Principales ────────────────────────
+// ── Renderizado y Cálculos del Cuadro de Mando Principal ────────────────────
 function renderSingleDashboard() {
   const data = filteredData;
   
-  // 1. ¿Cuánto dinero se lleva recaudado? -> SUMA DE PRECIO VENTA
+  // 1. Recaudación Total ($) -> PRECIO VENTA
   const totalVentas = data.reduce((s,r) => s + r.venta, 0);
   
-  // 2. ¿Cuántas ventas se hicieron? -> Conteo de registros válidos (órdenes de venta)
+  // 2. Cantidad de Ventas hechas -> Conteo de transacciones válidas
   const totalOrders = data.length;
   
-  // 3. ¿Cuántas unidades se vendieron? -> SUMA DE QTY
+  // 3. Unidades totales vendidas -> QTY
   const totalQty = data.reduce((s,r) => s + r.qty, 0);
 
-  // Pintar KPIs principales en pantalla
+  // Inyectar en elementos KPI de index.html
   if(document.getElementById('kpiVentas')) document.getElementById('kpiVentas').textContent = fmtFull(totalVentas);
   if(document.getElementById('kpiVentasOrders')) document.getElementById('kpiVentasOrders').textContent = totalOrders.toLocaleString('es-CL');
   if(document.getElementById('kpiVentasQty')) document.getElementById('kpiVentasQty').textContent = totalQty.toLocaleString('es-CL');
   if(document.getElementById('kpiTicket')) document.getElementById('kpiTicket').textContent = totalOrders > 0 ? fmtFull(totalVentas/totalOrders) : '$0';
 
-  // Gráfico de Productos (Top 10) basado en VALIDACIÓN KIT
+  // Gráfico de Productos (VALIDACIÓN KIT)
   destroyChart('prod');
   const prods = byKey(data, 'producto', a => a.slice(0,10));
   const ctxProd = document.getElementById('chartProductos');
@@ -336,7 +343,7 @@ function renderSingleDashboard() {
     });
   }
 
-  // Gráfico Donut de Canales/Portales
+  // Gráfico Circular de Market Share
   destroyChart('donut');
   let ports = byKey(data, 'portal').filter(p => p.label.trim().toUpperCase() !== "TOTAL GENERAL" && p.label.trim().toUpperCase() !== "N/A" && p.ventas > 0);
   const totalP = ports.reduce((s,p)=>s+p.ventas, 0);
@@ -357,7 +364,7 @@ function renderSingleDashboard() {
     });
   }
 
-  // Gráfico de Tendencia Mensual
+  // Línea Temporal Mensual
   destroyChart('line');
   const mData = {}; data.forEach(r => { if(r.mes) mData[r.mes] = (mData[r.mes]||0)+r.venta; });
   const sortedM = Object.keys(mData).sort((a,b)=>+a-+b);
@@ -376,7 +383,7 @@ function renderSingleDashboard() {
   const ctxOpsT = document.getElementById('chartTicketPortal');
   if(ctxOpsT) charts['opsT'] = new Chart(ctxOpsT, { type: 'bar', data: { labels:ports.map(p=>p.label), datasets:[{ data:ports.map(p=>Math.round(p.ventas/p.orders)), backgroundColor:'#3b82f6' }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} }, scales:{ y:{ticks:{callback:v=>fmtFull(v)}} } } });
 
-  // Tabla completa de Productos (VALIDACIÓN KIT) con Cantidades Exactas
+  // Tabla Desplegada Consolidada por SKU (VALIDACIÓN KIT)
   const allProds = byKey(data, 'producto');
   if(document.getElementById('tableProdCount')) document.getElementById('tableProdCount').textContent = `${allProds.length} SKUs`;
   
@@ -396,7 +403,7 @@ function renderSingleDashboard() {
   }
 }
 
-// ── Renderizado del Módulo Comparativo Interanual ──────────────────────────
+// ── Módulo Comparativo de Años ──────────────────────────────────────────────
 function runComparison() {
   const yearA = document.getElementById('compareYearA').value;
   const yearB = document.getElementById('compareYearB').value;
@@ -431,35 +438,12 @@ function runComparison() {
       options: { responsive: true, maintainAspectRatio: false, scales: baseScales() }
     });
   }
-
-  destroyChart('compDias');
-  const diasA = Array(31).fill(0), diasB = Array(31).fill(0);
-  dataA.forEach(r => { if(r.dia >= 1 && r.dia <= 31) diasA[r.dia - 1] += r.venta; });
-  dataB.forEach(r => { if(r.dia >= 1 && r.dia <= 31) diasB[r.dia - 1] += r.venta; });
-
-  const ctxCompD = document.getElementById('chartCompDias');
-  if (ctxCompD) {
-    charts['compDias'] = new Chart(ctxCompD, {
-      type: 'line', data: { labels: Array.from({length: 31}, (_, i) => String(i + 1)), datasets: [ { label: `Año ${yearA}`, data: diasA, borderColor: '#6366f1', tension: 0.2, fill: false }, { label: `Año ${yearB}`, data: diasB, borderColor: '#10b981', tension: 0.2, fill: false } ] },
-      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: baseScales() }
-    });
-  }
 }
 
-// ── Inicializador de Carga del DOM ──────────────────────────────────────────
+// ── Inicialización ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadLiveExcelData();
-  
-  // Vincular selectores de filtrado secundario
   ['filterPortal','filterMes','filterDoc'].forEach(id => {
-    const el = document.getElementById(id); 
-    if (el) el.addEventListener('change', applyFilters);
+    const el = document.getElementById(id); if (el) el.addEventListener('change', applyFilters);
   });
-
-  // Vincular clics de las pestañas superiores (Vista Única vs Comparativa)
-  const tabSingle = document.getElementById('tabSingle');
-  const tabCompare = document.getElementById('tabCompare');
-  
-  if(tabSingle) tabSingle.addEventListener('click', () => switchViewMode('single'));
-  if(tabCompare) tabCompare.addEventListener('click', () => switchViewMode('compare'));
 });
