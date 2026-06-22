@@ -1,8 +1,8 @@
 // ── CONFIGURACIÓN DE ORIGEN DE DATOS DIRECTO (GOOGLE SHEETS POR PESTAÑAS) ──
 // Base del documento (extraída de tu URL original)
-const SPREADSHEET_BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRtk4YnsUipIXMEhjv-vAly0VmChMBQEwvMhkUikPaZSKoynAET1yziqeU4KyUe9s8jjrzY24SItTmo/pub?output=csv";
+const SPREADSHEET_BASE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTYiU1nxu_oBNnGxEf8E4NU2_ibEZNq0Pn0o521_28fNTDBb8KBNOKm5KTchiRCjw/pub?output=csv";
 
-// Definición explícita de las pestañas de tu Google Sheet
+// Definición explícita de las pestañas activas en tu Google Sheet (Actualizado: 2024 - 2026)
 const HOJAS_CONFIG = [
   { anio: "2024", nombreHoja: "V24" },
   { anio: "2025", nombreHoja: "V25" },
@@ -50,7 +50,7 @@ async function loadLiveExcelData() {
   const contentEl = document.getElementById('dashboardContent');
 
   try {
-    console.log("Iniciando descarga simultánea de pestañas históricas (V22-V26)...");
+    console.log("Iniciando descarga simultánea de pestañas históricas (V24-V26)...");
     historicalStore = {}; 
 
     // Crear promesas de descarga para cada pestaña de forma paralela
@@ -189,7 +189,7 @@ function processCSVDataForYear(csvText, yearKey) {
 
 // ── Inicialización de Controles ──────────────────────────────
 function initDashboardSelectors() {
-  // Ordenar los años de forma descendente (2026 primero, hasta 2022)
+  // Ordenar los años de forma descendente (2026 primero, hasta 2024)
   const disponibles = Object.keys(historicalStore).sort((a,b) => b-a); 
   
   if (disponibles.length === 0) {
@@ -246,6 +246,8 @@ function changeSingleYear() {
   activeYear = document.getElementById('selectSingleYear').value;
   triggerSingleYearCalculations();
 }
+
+// ... (El resto del código de renderizado y eventos se mantiene idéntico)
 
 function triggerSingleYearCalculations() {
   const data = historicalStore[activeYear] || [];
