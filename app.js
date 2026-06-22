@@ -144,21 +144,35 @@ function processCSVData(csvText) {
   const idxMes    = col['MES OC'] ?? col['MES'] ?? 20;
   const idxDia    = col['DIA OC'] ?? col['DIA'] ?? col['DÍA'] ?? -1;
   const idxAnio   = col['AÑO OC'] ?? col['AÑO'] ?? -1;
+  const idxFecha  = col['FECHA'] ?? col['FECHA OC'] ?? 0; 
 
   for (let i = hdrIdx + 1; i < json.length; i++) {
     const r = json[i];
     if (!r || r.length === 0 || !r[idxNV]) continue; 
 
-    // Determinar el año dinámicamente por columna o por celda de fecha
-    let yearKey = "2026"; 
+    // Extraer el año de forma flexible y adaptada a la escala 2022 - 2026
+    let yearKey = ""; 
+    
+    // 1. Intentar por columna directa de año
     if (idxAnio !== -1 && r[idxAnio]) {
-      yearKey = String(r[idxAnio]).trim().match(/\d+/)?.[0] || "2026";
-    } else if (r[0] && String(r[0]).includes("/")) {
-      const parts = String(r[0]).split("/");
-      if (parts.length === 3) yearKey = parts[2].trim().substring(0, 4);
+      yearKey = String(r[idxAnio]).trim().match(/\d+/)?.[0] || "";
+    } 
+    
+    // 2. Si falla, intentar extraerlo de la columna de fecha completa o columna 0
+    if ((!yearKey || yearKey.length < 2) && r[idxFecha]) {
+      const fechaStr = String(r[idxFecha]);
+      const matchAnio = fechaStr.match(/\b(202[2-6])\b/) || fechaStr.match(/\b(2[2-6])\b/);
+      if (matchAnio) yearKey = matchAnio[0];
     }
+
+    // Normalizar formato de año de dos dígitos (ej: "24" -> "2024")
     if (yearKey.length === 2) yearKey = "20" + yearKey;
-    if (yearKey.length !== 4) yearKey = "2026"; 
+    
+    // Validar rango objetivo. Si no es un año válido entre 2022 y 2026, se categoriza como "Otros"
+    const numAnio = parseInt(yearKey);
+    if (isNaN(numAnio) || numAnio < 2022 || numAnio > 2026) {
+      yearKey = "Otros"; 
+    }
 
     let diaCalculado = "15"; 
     if (idxDia !== -1 && r[idxDia]) {
@@ -182,6 +196,8 @@ function processCSVData(csvText) {
     }
     historicalStore[yearKey].push(rowObj);
   }
+  
+  console.log("Estructura de años cargada:", Object.keys(historicalStore));
 }
 
 // ── Inicialización de Controles ──────────────────────────────
