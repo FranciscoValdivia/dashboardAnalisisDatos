@@ -25,6 +25,26 @@ const PALETTE = {
   defaultPortales: ['#6366f1', '#8b5cf6', '#d946ef', '#06b6d4']
 };
 
+// Lista blanca: estos son los ÚNICOS portales que existen realmente en la planilla.
+// Cualquier otro valor (vacío, typo, variante de tildes/mayúsculas) se descarta.
+const PORTAL_CANONICAL = {
+  'AMERICATECH':   'AMERICATECH',
+  'FALABELLA':     'FALABELLA',
+  'MERCADO LIBRE': 'MERCADO LIBRE',
+  'MERCADOLIBRE':  'MERCADO LIBRE',
+  'PARIS':         'PARÍS',
+  'PARÍS':         'PARÍS',
+  'RIPLEY':        'RIPLEY',
+  'WALMART':       'WALMART'
+};
+
+// Normaliza el valor crudo de portal a uno de los 6 nombres canónicos.
+// Si no matchea ninguno (vacío, typo, basura), devuelve '' (inválido).
+function normalizePortal(raw) {
+  const p = String(raw || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  return PORTAL_CANONICAL[p] || '';
+}
+
 const MESES_NAMES = {
   '1':'Enero','2':'Febrero','3':'Marzo','4':'Abril','5':'Mayo','6':'Junio',
   '7':'Julio','8':'Agosto','9':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'
@@ -205,7 +225,7 @@ function processCSVDataForYear(csvText, yearKey) {
       qty:      safeNum(r[idxQTY]) || 0,
       pn:       String(r[idxPN] || '').trim(),
       producto: prodVal,
-      portal:   String(r[idxPortal] || 'Otros').trim().toUpperCase(),
+      portal:   normalizePortal(r[idxPortal]) || 'OTROS',
       venta:    safeNum(r[idxVenta]),
       docTipo:  String(r[idxDoc] || 'N/A').trim().toUpperCase().replace(/\s+/g,''),
       mes:      normalizeMes(r[idxMes]),
@@ -381,7 +401,7 @@ function renderSingleDashboard() {
   }
 
   destroyChart('donut');
-  let ports = byKey(data, 'portal').filter(p => p.label.trim().toUpperCase() !== "TOTAL GENERAL" && p.label.trim().toUpperCase() !== "N/A" && p.ventas > 0);
+  let ports = byKey(data, 'portal').filter(p => p.label.trim().toUpperCase() !== "TOTAL GENERAL" && p.label.trim().toUpperCase() !== "N/A" && p.label.trim().toUpperCase() !== "OTROS" && p.ventas > 0);
   const totalP = ports.reduce((s,p)=>s+p.ventas, 0);
   
   const ctxDonut = document.getElementById('chartPortalDonut');
