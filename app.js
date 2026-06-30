@@ -26,11 +26,20 @@ const PALETTE = {
 };
 
 const MESES_NAMES = {
-  '1':'Enero','2':'Febrero','3':'Marzo','4 HARDWARE':'Abril','4':'Abril','5':'Mayo','6 JUNIO':'Junio','6':'Junio',
-  '7':'Julio','8':'Agosto','9':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre',
-  '01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio',
-  '07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'
+  '1':'Enero','2':'Febrero','3':'Marzo','4':'Abril','5':'Mayo','6':'Junio',
+  '7':'Julio','8':'Agosto','9':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'
 };
+
+// Extrae SOLO el número de mes de un valor potencialmente "sucio"
+// (ej: "4 HARDWARE", "06", " 6 - Junio ", etc.) y lo normaliza a string sin ceros a la izquierda.
+function normalizeMes(raw) {
+  const str = String(raw || '').trim();
+  const match = str.match(/\d{1,2}/);
+  if (!match) return '';
+  const n = parseInt(match[0], 10);
+  if (isNaN(n) || n < 1 || n > 12) return '';
+  return String(n);
+}
 
 function getPortalColor(p) { return PALETTE.mappedPortales[String(p||'').trim().toUpperCase()] || PALETTE.defaultPortales[0]; }
 
@@ -199,7 +208,7 @@ function processCSVDataForYear(csvText, yearKey) {
       portal:   String(r[idxPortal] || 'Otros').trim().toUpperCase(),
       venta:    safeNum(r[idxVenta]),
       docTipo:  String(r[idxDoc] || 'N/A').trim().toUpperCase().replace(/\s+/g,''),
-      mes:      String(r[idxMes] || '').trim(),
+      mes:      normalizeMes(r[idxMes]),
       dia:      parseInt(diaCalculado) || 1
     };
 
